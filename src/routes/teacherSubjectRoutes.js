@@ -15,7 +15,7 @@ const router = express.Router()
 router.get(
   '/',
   verifyToken,
-  allowRoles('admin', 'guru', 'kepala_sekolahsan'),
+  allowRoles('admin', 'guru', 'kepala_sekolah'),
   getTeacherSubjects
 )
 

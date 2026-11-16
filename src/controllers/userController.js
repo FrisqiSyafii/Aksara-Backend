@@ -299,63 +299,219 @@ const deleteUser = async (req, res) => {
 // UPDATE PROFILE
 // ========================================
 
+
 const updateProfile = async (req, res) => {
   try {
     const { id } = req.params;
-
     const { nama, username, password } = req.body;
 
-    if (!nama || !username) {
+    // ========================================
+    // VALIDASI AKUN LOGIN
+    // ========================================
+
+    if (
+      !/^[1-9]\d*$/.test(String(id)) ||
+      !Number.isSafeInteger(Number(id))
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Nama dan username wajib diisi.",
+        message: "ID pengguna tidak valid.",
       });
     }
 
-    let query = `
-      UPDATE users
-      SET
-        nama = ?,
-        username = ?
-    `;
-
-    let params = [nama, username];
-
-    // jika password diganti
-
-    if (password) {
-      const bcrypt = require("bcryptjs");
-
-      const hash = await bcrypt.hash(password, 10);
-
-      query += `,
-        password = ?
-      `;
-
-      params.push(hash);
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        message: "Sesi login tidak valid. Silakan login kembali.",
+      });
     }
 
-    query += `
+    // Setiap pengguna hanya dapat mengubah profil sendiri.
+    if (Number(req.user.id) !== Number(id)) {
+      return res.status(403).json({
+        success: false,
+        message: "Anda hanya dapat mengubah profil sendiri.",
+      });
+    }
+
+    // ========================================
+    // VALIDASI NAMA DAN USERNAME
+    // ========================================
+
+    const cleanName =
+      typeof nama === "string" ? nama.trim() : "";
+
+    const cleanUsername =
+      typeof username === "string"
+        ? username.trim().toLowerCase()
+        : "";
+
+    if (!cleanName || cleanName.length > 100) {
+      return res.status(400).json({
+        success: false,
+        message: "Nama wajib diisi dan maksimal 100 karakter.",
+      });
+    }
+
+    const emailRegex =
+      /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+    if (
+      cleanUsername.length < 6 ||
+      cleanUsername.length > 100 ||
+      !emailRegex.test(cleanUsername)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Username harus menggunakan format email yang valid, " +
+          "contoh: teguhs@alkirom.my.id.",
+      });
+    }
+
+    // ========================================
+    // VALIDASI PASSWORD
+    // ========================================
+
+    // Null atau string kosong berarti password tidak diubah.
+    const changePassword =
+      password !== undefined &&
+      password !== null &&
+      password !== "";
+
+    if (changePassword) {
+      if (
+        typeof password !== "string" ||
+        password.length < 8 ||
+        Buffer.byteLength(password, "utf8") > 72
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Password baru minimal 8 karakter dan maksimal 72 byte.",
+        });
+      }
+    }
+
+    // ========================================
+    // CEK AKUN DAN ROLE TERKINI
+    // ========================================
+
+    const [users] = await pool.execute(
+      `
+      SELECT id, role
+      FROM users
       WHERE id = ?
-    `;
+      LIMIT 1
+      `,
+      [id]
+    );
 
-    params.push(id);
+    if (users.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Akun pengguna tidak ditemukan.",
+      });
+    }
 
-    await pool.execute(query, params);
+    // Hak akses tidak boleh diubah melalui Edit Profil.
+    const allowedRoles = [
+      "admin",
+      "guru",
+      "kepala_sekolah",
+    ];
 
-    return res.json({
+    if (!allowedRoles.includes(users[0].role)) {
+      return res.status(403).json({
+        success: false,
+        message: "Hak akses akun tidak diizinkan.",
+      });
+    }
+
+    // ========================================
+    // CEK USERNAME DUPLIKAT
+    // ========================================
+
+    const [duplicates] = await pool.execute(
+      `
+      SELECT id
+      FROM users
+      WHERE username = ?
+        AND id <> ?
+      LIMIT 1
+      `,
+      [cleanUsername, id]
+    );
+
+    if (duplicates.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: "Username sudah digunakan akun lain.",
+      });
+    }
+
+    // ========================================
+    // SIMPAN PERUBAHAN
+    // ========================================
+
+    if (changePassword) {
+      const hashedPassword = await bcrypt.hash(
+        password,
+        12
+      );
+
+      await pool.execute(
+        `
+        UPDATE users
+        SET nama = ?, username = ?, password = ?
+        WHERE id = ?
+        `,
+        [
+          cleanName,
+          cleanUsername,
+          hashedPassword,
+          id,
+        ]
+      );
+    } else {
+      await pool.execute(
+        `
+        UPDATE users
+        SET nama = ?, username = ?
+        WHERE id = ?
+        `,
+        [cleanName, cleanUsername, id]
+      );
+    }
+
+    return res.status(200).json({
       success: true,
       message: "Profil berhasil diperbarui.",
+      data: {
+        id: Number(id),
+        nama: cleanName,
+        username: cleanUsername,
+        role: users[0].role,
+      },
     });
+
   } catch (error) {
+    if (error.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({
+        success: false,
+        message: "Username sudah digunakan.",
+      });
+    }
+
     console.error("Update profile error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: "Server error",
+      message: "Gagal memperbarui profil.",
     });
   }
 };
+
 
 // ========================================
 // GET DATA GURU

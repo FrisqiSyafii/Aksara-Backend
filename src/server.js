@@ -18,6 +18,7 @@ const reportRoutes = require("./routes/reportRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 const faceRoutes = require("./routes/faceRoutes");
 const documentRoutes = require("./routes/documentRoutes");
+const publicDocumentRoutes = require("./routes/publicDocumentRoutes");
 
 const app = express();
 
@@ -47,6 +48,7 @@ app.use("/api/recap", recapRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/face", faceRoutes);
 app.use("/api/documents", documentRoutes);
+app.use("/api/public-documents", publicDocumentRoutes);
 
 const PORT = process.env.PORT || 5000;
 
